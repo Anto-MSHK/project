@@ -1,136 +1,159 @@
-import { useEffect, useState } from "react";
-import { itemsApi } from "../../api/items";
-import plusIcon from "../../assets/icons/plus-icon.svg";
-
-import Item from "../Item/Item";
+import React, { useEffect, useState } from "react";
+import { useAppSelector, useAppDispatch } from "../../../shared/store";
+import { setAnalysisId, setDocuments, setFindings, addDocument } from "../../../shared/store";
+import { analysisApi, documentsApi, findingsApi, PlatformWebSocket } from "../../api/platform";
 import { getLocalizedString } from "../../lib/i18n";
+import AnalysisList from "../AnalysisList/AnalysisList";
+import DocumentList from "../DocumentList/DocumentList";
+import DocumentViewer from "../DocumentViewer/DocumentViewer";
+import "../../../shared/styles/global.css";
 
 const Panel = () => {
-  const [currentItems, setCurrentItems] = useState<Array<{_id: string; name: string; url: string}>>([]);
+  const dispatch = useAppDispatch();
+  const { agentId, analysisId, documents, findings, isLoading } = useAppSelector(state => state.legalAgent);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [ws, setWs] = useState<PlatformWebSocket | null>(null);
 
-  const onAddClick = () => {
-    try {
-      itemsApi
-        .addItem({
-          name: "New Item",
-          url: "https://example.com",
-        })
-        .then((newItem) => {
-          setCurrentItems((prevItems) => [...prevItems, newItem]);
-        });
-    } catch (error) {
-      console.error("Error adding item:", error);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      if (!id) {
-        console.error("Cannot delete item with undefined id");
-        return;
-      }
-      await itemsApi.deleteItem(id);
-      setCurrentItems(currentItems.filter((item) => item._id !== id));
-    } catch (error) {
-      console.error("Error deleting item:", error);
-    }
-  };
-
-  const getItems = async () => {
-    try {
-      setError(null);
-      const data = await itemsApi.getItems();
-      setCurrentItems(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Error fetching items:", error);
-      setError(getLocalizedString("aiwizeCombinerPanelListError", 'Failed to load items'));
-      setCurrentItems([]);
-    }
-  };
-
+  // Initialize WebSocket connection
   useEffect(() => {
-    getItems();
+    const websocket = new PlatformWebSocket('left');
+    websocket.connect((message) => {
+      // Handle real-time messages from right panel
+      if (message.type === 'SHOW_FINDING' && message.payload) {
+        const { documentId, findingId } = message.payload;
+        setSelectedDocumentId(documentId);
+        // Could highlight specific finding here
+      }
+    }).catch(console.error);
+    
+    setWs(websocket);
+    
+    return () => {
+      websocket.disconnect();
+    };
   }, []);
 
+  // Load documents when analysis changes
+  useEffect(() => {
+    if (agentId && analysisId) {
+      loadDocuments();
+      loadFindings();
+    }
+  }, [agentId, analysisId]);
+
+  const loadDocuments = async () => {
+    if (!agentId || !analysisId) return;
+    
+    try {
+      setError(null);
+      const docs = await documentsApi.getDocuments(agentId, analysisId);
+      dispatch(setDocuments(docs));
+    } catch (error) {
+      console.error("Error loading documents:", error);
+      setError("Failed to load documents");
+    }
+  };
+
+  const loadFindings = async () => {
+    if (!agentId || !analysisId) return;
+    
+    try {
+      const findingsData = await findingsApi.getFindings(agentId, analysisId);
+      dispatch(setFindings(findingsData));
+    } catch (error) {
+      console.error("Error loading findings:", error);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!agentId || !analysisId) {
+      setError("Please select an analysis session first");
+      return;
+    }
+
+    try {
+      setError(null);
+      const newDocument = await documentsApi.uploadDocument(file, agentId, analysisId);
+      dispatch(addDocument(newDocument));
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      setError("Failed to upload document");
+    }
+  };
+
+  const handleAnalysisSelect = (newAnalysisId: string) => {
+    dispatch(setAnalysisId(newAnalysisId));
+    setSelectedDocumentId(null);
+  };
+
+  const handleDocumentSelect = (documentId: string) => {
+    setSelectedDocumentId(documentId);
+  };
+
+  const selectedDocument = documents.find(doc => doc._id === selectedDocumentId);
+
   return (
-    <div
-      style={{
-        width: "100%",
-        height: "100vh",
-        // borderRadius: "0 10px 10px 0",
-        border: "1px solid #7b7b7b",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          color: "var(--text-color)",
-          fontSize: "16px",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 16px",
-          borderBottom: "1px solid #7b7b7b",
-        }}
-      >
-        {getLocalizedString("aiwizeCombinerPanelTitle", "AI Wize Combiner Panel")}
-        <img
-          style={{
-            cursor: "pointer",
-          }}
-          src={plusIcon}
-          alt="add item"
-          width={16}
-          height={16}
-          onClick={onAddClick}
-        />
+    <div className="legal-agent-left-panel">
+      <div className="panel-header">
+        {getLocalizedString("legalAgentLeftPanel", "Legal Agent - Documents")}
       </div>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "8px",
-          padding: "8px",
-        }}
-      >
-        {error ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "16px",
-              padding: "24px",
-              color: "var(--text-color)"
-            }}
-          >
-            <div>{error}</div>
-            <button
-              onClick={getItems}
-              style={{
-                border: "none",
-                borderRadius: "4px",
-                padding: "8px 16px",
-                cursor: "pointer",
-                background: "var(--theme-button-background, black)",
-                color: "white"
-              }}
+      
+      <div className="panel-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {error && (
+          <div className="error">
+            {error}
+            <button 
+              className="btn btn-primary" 
+              onClick={() => setError(null)}
+              style={{ marginLeft: '12px' }}
             >
-              {getLocalizedString("aiwizeCombinerPanelRefresh", 'Refresh')}
+              Dismiss
             </button>
           </div>
-        ) : (
-          Array.isArray(currentItems) && currentItems.map((item) => 
-            item && (
-              <Item
-                key={item._id}
-                _id={item._id}
-                name={item.name}
-                url={item.url}
-                onDeleteItem={handleDelete}
-              />
-            )
-          )
+        )}
+
+        {/* Analysis Sessions Section */}
+        <div style={{ marginBottom: '16px' }}>
+          <h3 style={{ marginBottom: '8px', color: 'var(--text-color)' }}>Analysis Sessions</h3>
+          <AnalysisList onAnalysisSelect={handleAnalysisSelect} />
+        </div>
+
+        {/* Documents Section */}
+        {analysisId && (
+          <div style={{ marginBottom: '16px' }}>
+            <h3 style={{ marginBottom: '8px', color: 'var(--text-color)' }}>Documents</h3>
+            <DocumentList 
+              documents={documents}
+              selectedDocumentId={selectedDocumentId}
+              onDocumentSelect={handleDocumentSelect}
+              onFileUpload={handleFileUpload}
+            />
+          </div>
+        )}
+
+        {/* Document Viewer Section */}
+        {selectedDocument && (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <h3 style={{ marginBottom: '8px', color: 'var(--text-color)' }}>Document Viewer</h3>
+            <DocumentViewer 
+              document={selectedDocument}
+              findings={findings.filter(f => f.documentId === selectedDocument._id)}
+            />
+          </div>
+        )}
+
+        {!analysisId && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            flex: 1,
+            color: 'var(--secondary-color)',
+            textAlign: 'center'
+          }}>
+            Select an analysis session to view documents
+          </div>
         )}
       </div>
     </div>
