@@ -1,0 +1,7 @@
+[build]
+entrypoints = ["./src/bin/www.ts"]
+outdir = "./dist"
+target = "node"
+
+[dev]
+watch = true

@@ -1,0 +1,7 @@
+dist
+node_modules
+/browser-api
+/browser-api.exe
+database.db
+database.db.wal
+browser-api-macos-arm
